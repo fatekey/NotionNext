@@ -6,8 +6,9 @@ import CategoryGroup from './CategoryGroup'
 import TagGroups from './TagGroups'
 import CONFIG_NEXT from '../config_next'
 import { useRouter } from 'next/router'
-import NextRecentComments from './NextRecentComments'
 import BLOG from '@/blog.config'
+import dynamic from 'next/dynamic'
+const NextRecentComments = dynamic(() => import('./NextRecentComments'))
 
 /**
  * 侧边平铺
@@ -22,9 +23,6 @@ import BLOG from '@/blog.config'
 const SideAreaRight = (props) => {
   const { tags, currentTag, slot, categories, currentCategory } = props
   const { locale } = useGlobal()
-  if (!CONFIG_NEXT.RIGHT_BAR) {
-    return <></>
-  }
   const router = useRouter()
   return (<aside id='right' className='hidden 2xl:block flex-col w-60 ml-4'>
 

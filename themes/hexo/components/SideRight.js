@@ -6,9 +6,10 @@ import Catalog from './Catalog'
 import { InfoCard } from './InfoCard'
 import { AnalyticsCard } from './AnalyticsCard'
 import CONFIG_HEXO from '../config_hexo'
-import HexoRecentComments from './HexoRecentComments'
 import BLOG from '@/blog.config'
+import dynamic from 'next/dynamic'
 
+const HexoRecentComments = dynamic(() => import('./HexoRecentComments'))
 /**
  * Hexo主题右侧栏
  * @param {*} props
@@ -27,7 +28,7 @@ export default function SideRight(props) {
 
       {showCategory && (
         <Card>
-          <div className='ml-2 mb-1 font-sans'>
+          <div className='ml-2 mb-1 '>
             <i className='fas fa-th' /> 分类
           </div>
           <CategoryGroup
