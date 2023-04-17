@@ -11,7 +11,20 @@ module.exports = withBundleAnalyzer({
       'gravatar.com',
       'www.notion.so',
       'avatars.githubusercontent.com',
-      'images.unsplash.com'
+      'images.unsplash.com',
+      'source.unsplash.com',
+      'p1.qhimg.com',
+      'webmention.io'
+    ]
+  },
+  // 默认将feed重定向至 /public/rss/feed.xml
+  async redirects() {
+    return [
+      {
+        source: '/feed',
+        destination: '/rss/feed.xml',
+        permanent: true
+      }
     ]
   },
   async rewrites() {
