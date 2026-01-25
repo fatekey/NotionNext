@@ -52,6 +52,7 @@
     "@clerk/nextjs": "^5.7.5",
     "@headlessui/react": "^1.7.19",
     "@next/bundle-analyzer": "^12.3.7",
+    "@tabler/icons-react": "^3.36.1",
     "@vercel/analytics": "^1.5.0",
     "algoliasearch": "^4.25.2",
     "axios": "^1.7.2",
