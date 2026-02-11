@@ -486,6 +486,15 @@ export const Style = () => {
         animation: rotate 8s linear infinite;
       }
 
+      /* Endspace uses a custom music UI that controls APlayer remotely.
+         Hide the default global APlayer/MetingJS fixed widget. */
+      #theme-endspace .aplayer.aplayer-fixed,
+      #theme-endspace ~ .aplayer.aplayer-fixed,
+      .aplayer.aplayer-fixed,
+      meting-js[fixed='true'] {
+        display: none !important;
+      }
+
       /* ============================================
          Scan Line & HUD Animations
          ============================================ */

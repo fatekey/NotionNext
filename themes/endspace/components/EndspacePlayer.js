@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { siteConfig } from '@/lib/config'
 import {
   IconPlayerPlay,
@@ -12,136 +12,92 @@ import {
 
 /**
  * EndspacePlayer Component - Compact Sci-Fi Music Player for Endspace Theme
- * Integrates with widget.config.js settings
- * Has two states: expanded (full info) and collapsed (rotating cover when playing)
- * Tabler Icons for Futuristic Feel
+ * Acts as a UI remote control for the global APlayer instance.
+ * Does not create its own audio element - delegates all playback to APlayer.
  */
 export const EndspacePlayer = ({ isExpanded }) => {
+  const [isReady, setIsReady] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTrack, setCurrentTrack] = useState(0)
   const [progress, setProgress] = useState(0)
-  const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
+  const [audioList, setAudioList] = useState([])
   const [showPlaylist, setShowPlaylist] = useState(false)
-  const audioRef = useRef(null)
-  const progressIntervalRef = useRef(null)
+  const playerRef = useRef(null)
+  const pollTimerRef = useRef(null)
 
-  // Get configuration from widget.config.js
   const musicPlayerEnabled = siteConfig('MUSIC_PLAYER')
-  const autoPlay = JSON.parse(siteConfig('MUSIC_PLAYER_AUTO_PLAY') || 'false')
   const playOrder = siteConfig('MUSIC_PLAYER_ORDER')
-  const audioList = siteConfig('MUSIC_PLAYER_AUDIO_LIST') || []
-  const hasInitializedRef = useRef(false)
 
-  // Don't render if disabled or no audio
-  if (!musicPlayerEnabled || audioList.length === 0) {
-    return null
-  }
-
-  const currentAudio = audioList[currentTrack] || {}
-
-  // Initialize audio element
-  useEffect(() => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio()
-      audioRef.current.volume = 0.7
-      
-      audioRef.current.addEventListener('ended', handleTrackEnd)
-      audioRef.current.addEventListener('loadedmetadata', () => {
-        setDuration(audioRef.current.duration)
-      })
-      audioRef.current.addEventListener('error', (e) => {
-        console.error('Audio load error:', e)
-      })
-    }
-
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current.removeEventListener('ended', handleTrackEnd)
-      }
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current)
-      }
+  // Sync all UI state from the APlayer instance
+  const syncState = useCallback((player) => {
+    if (!player?.audio) return
+    setIsPlaying(!player.audio.paused)
+    setCurrentTrack(player.list.index)
+    const total = player.audio.duration || 0
+    const current = player.audio.currentTime || 0
+    setCurrentTime(current)
+    setProgress(total > 0 ? (current / total) * 100 : 0)
+    if (player.list.audios?.length > 0) {
+      setAudioList([...player.list.audios])
     }
   }, [])
 
-  // Load track when currentTrack changes - always auto-play when switching
+  // Poll for the global APlayer instance and bind events once available
   useEffect(() => {
-    if (audioRef.current && currentAudio.url) {
-      audioRef.current.src = currentAudio.url
-      audioRef.current.load()
-      setProgress(0)
-      setCurrentTime(0)
-      
-      // Auto-play when switching tracks (if already initialized)
-      if (hasInitializedRef.current) {
-        audioRef.current.play().catch(e => console.log('Autoplay prevented:', e))
-        setIsPlaying(true)
-      }
+    if (!musicPlayerEnabled) return
+
+    const bindPlayer = (player) => {
+      playerRef.current = player
+      syncState(player)
+
+      player.on('play', () => setIsPlaying(true))
+      player.on('pause', () => setIsPlaying(false))
+      player.on('timeupdate', () => {
+        if (!player.audio) return
+        const total = player.audio.duration || 0
+        const current = player.audio.currentTime || 0
+        setCurrentTime(current)
+        setProgress(total > 0 ? (current / total) * 100 : 0)
+      })
+      player.on('listswitch', () => {
+        setCurrentTrack(player.list.index)
+        setProgress(0)
+        setCurrentTime(0)
+        if (player.list.audios?.length > 0) {
+          setAudioList([...player.list.audios])
+        }
+      })
+
+      setIsReady(true)
     }
-  }, [currentTrack, currentAudio.url])
 
-  // Auto-play on initial load based on config
-  useEffect(() => {
-    // Only run this once on mount/init for autoplay
-    if (hasInitializedRef.current) return
-
-    if (autoPlay && audioRef.current && currentAudio.url) {
-      hasInitializedRef.current = true
-      
-      // Simple, direct attempt to play
-      const attemptPlay = async () => {
-        try {
-          await audioRef.current?.play()
-          setIsPlaying(true)
-        } catch (error) {
-          console.log('Autoplay prevented by browser:', error)
-          // We DO NOT attach global listeners here to prevent zombie audio.
-          // If browser blocks, user must manually click play.
+    const checkAPlayer = () => {
+      if (
+        typeof window !== 'undefined' &&
+        window.aplayers?.length > 0 &&
+        window.aplayers[0]?.audio
+      ) {
+        bindPlayer(window.aplayers[0])
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current)
+          pollTimerRef.current = null
         }
       }
-      
-      // Small delay to ensure DOM is ready
-      const timer = setTimeout(attemptPlay, 800)
-      return () => clearTimeout(timer)
-    } else {
-       hasInitializedRef.current = true
     }
-  }, [currentAudio.url, autoPlay])
 
-  // Strict cleanup when track changes
-  useEffect(() => {
+    checkAPlayer()
+    if (!playerRef.current) {
+      pollTimerRef.current = setInterval(checkAPlayer, 500)
+    }
+
     return () => {
-       // FORCE PAUSE on unmount/change to kill zombie audio
-       if (audioRef.current) {
-          audioRef.current.pause()
-       }
-    }
-  }, [currentAudio.url])
-
-  // Progress update
-  useEffect(() => {
-    if (isPlaying) {
-      progressIntervalRef.current = setInterval(() => {
-        if (audioRef.current) {
-          const current = audioRef.current.currentTime
-          const total = audioRef.current.duration || 1
-          setCurrentTime(current)
-          setProgress((current / total) * 100)
-        }
-      }, 200)
-    } else {
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current)
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current)
+        pollTimerRef.current = null
       }
     }
-    return () => {
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current)
-      }
-    }
-  }, [isPlaying])
+  }, [musicPlayerEnabled, syncState])
 
   // Close playlist when sidebar collapses
   useEffect(() => {
@@ -150,60 +106,65 @@ export const EndspacePlayer = ({ isExpanded }) => {
     }
   }, [isExpanded])
 
-  const handleTrackEnd = () => {
-    if (playOrder === 'random') {
-      const randomIndex = Math.floor(Math.random() * audioList.length)
-      setCurrentTrack(randomIndex)
-    } else {
-      setCurrentTrack((prev) => (prev + 1) % audioList.length)
-    }
+  // Don't render if music player is disabled
+  if (!musicPlayerEnabled) {
+    return null
   }
+
+  const currentAudio = audioList[currentTrack] || {}
 
   const togglePlay = (e) => {
     e.stopPropagation()
-    if (!audioRef.current) return
-    
-    if (isPlaying) {
-      audioRef.current.pause()
-    } else {
-      audioRef.current.play().catch(e => console.log('Play prevented:', e))
-    }
-    setIsPlaying(!isPlaying)
+    const player = playerRef.current
+    if (!player) return
+    player.toggle()
   }
 
   const playNext = (e) => {
     e?.stopPropagation()
+    const player = playerRef.current
+    if (!player || audioList.length === 0) return
     if (playOrder === 'random') {
-      const randomIndex = Math.floor(Math.random() * audioList.length)
-      setCurrentTrack(randomIndex)
+      player.list.switch(Math.floor(Math.random() * audioList.length))
     } else {
-      setCurrentTrack((prev) => (prev + 1) % audioList.length)
+      player.list.switch((player.list.index + 1) % audioList.length)
     }
   }
 
   const playPrev = (e) => {
     e?.stopPropagation()
-    setCurrentTrack((prev) => (prev - 1 + audioList.length) % audioList.length)
-  }
-
-  const selectTrack = (index) => {
-    setCurrentTrack(index)
-    setShowPlaylist(false)
-    if (!isPlaying) {
-      setTimeout(() => {
-        audioRef.current?.play().catch(e => console.log('Play prevented:', e))
-        setIsPlaying(true)
-      }, 100)
+    const player = playerRef.current
+    if (!player || audioList.length === 0) return
+    if (playOrder === 'random') {
+      player.list.switch(Math.floor(Math.random() * audioList.length))
+    } else {
+      player.list.switch(
+        (player.list.index - 1 + audioList.length) % audioList.length
+      )
     }
   }
 
+  const selectTrack = (index) => {
+    const player = playerRef.current
+    if (!player) return
+    if (index === player.list.index) {
+      // Same track - play if paused
+      if (player.audio.paused) {
+        player.play()
+      }
+    } else {
+      player.list.switch(index)
+    }
+    setShowPlaylist(false)
+  }
+
   const handleProgressClick = (e) => {
-    if (!audioRef.current || !audioRef.current.duration) return
+    const player = playerRef.current
+    if (!player?.audio?.duration) return
     const rect = e.currentTarget.getBoundingClientRect()
     const clickX = e.clientX - rect.left
     const percentage = clickX / rect.width
-    audioRef.current.currentTime = percentage * audioRef.current.duration
-    setProgress(percentage * 100)
+    player.seek(percentage * player.audio.duration)
   }
 
   const formatTime = (seconds) => {
@@ -217,16 +178,16 @@ export const EndspacePlayer = ({ isExpanded }) => {
   if (!isExpanded) {
     return (
       <div className="endspace-player-mini flex justify-center py-2">
-        <div 
+        <div
           className={`relative w-10 h-10 cursor-pointer group flex items-center justify-center`}
           onClick={togglePlay}
         >
-          {isPlaying ? (
+          {isReady && isPlaying ? (
             // Playing: Show rotating album cover
             <>
               <div className="w-full h-full rounded-full overflow-hidden endspace-player-glow endspace-player-rotating">
-                <img 
-                  src={currentAudio.cover || '/default-cover.jpg'} 
+                <img
+                  src={currentAudio.cover || '/default-cover.jpg'}
                   alt="Cover"
                   className="w-full h-full object-cover"
                 />
@@ -237,11 +198,27 @@ export const EndspacePlayer = ({ isExpanded }) => {
               </div>
             </>
           ) : (
-            // Not playing: Show music icon
-            <div className="w-full h-full rounded-lg flex items-center justify-center bg-[var(--endspace-bg-secondary)] text-[var(--endspace-text-muted)] hover:text-gray-600 hover:bg-gray-200 transition-all">
+            // Not playing or not ready: Show music icon
+            <div className={`w-full h-full rounded-lg flex items-center justify-center bg-[var(--endspace-bg-secondary)] text-[var(--endspace-text-muted)] hover:text-gray-600 hover:bg-gray-200 transition-all ${!isReady ? 'opacity-50 pointer-events-none' : ''}`}>
               <IconMusic size={18} stroke={1.5} />
             </div>
           )}
+        </div>
+      </div>
+    )
+  }
+
+  // Not ready yet in expanded mode: show minimal placeholder
+  if (!isReady || audioList.length === 0) {
+    return (
+      <div className="endspace-player-full px-3 py-3 relative">
+        <div className="flex gap-3 items-center">
+          <div className="w-12 h-12 rounded bg-[var(--endspace-bg-secondary)] flex items-center justify-center opacity-50">
+            <IconMusic size={20} stroke={1.5} className="text-[var(--endspace-text-muted)]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-[var(--endspace-text-muted)]">Loading player...</div>
+          </div>
         </div>
       </div>
     )
@@ -253,12 +230,12 @@ export const EndspacePlayer = ({ isExpanded }) => {
       {/* Main Content Row */}
       <div className="flex gap-3 items-start">
         {/* Album Cover with integrated play button */}
-        <div 
+        <div
           className={`relative flex-shrink-0 w-12 h-12 rounded cursor-pointer overflow-hidden group ${isPlaying ? 'endspace-player-glow' : ''}`}
           onClick={togglePlay}
         >
-          <img 
-            src={currentAudio.cover || '/default-cover.jpg'} 
+          <img
+            src={currentAudio.cover || '/default-cover.jpg'}
             alt="Album Cover"
             className={`w-full h-full object-cover transition-transform duration-300 ${isPlaying ? 'scale-105' : ''}`}
           />
@@ -282,11 +259,11 @@ export const EndspacePlayer = ({ isExpanded }) => {
           </div>
           {/* Progress Bar */}
           <div className="mt-1.5 flex items-center gap-2">
-            <div 
+            <div
               className="flex-1 h-1 bg-[var(--endspace-bg-tertiary)] rounded-full cursor-pointer overflow-hidden"
               onClick={handleProgressClick}
             >
-              <div 
+              <div
                 className="h-full bg-[var(--endspace-accent-yellow)] transition-all duration-200"
                 style={{ width: `${progress}%` }}
               />
@@ -300,24 +277,24 @@ export const EndspacePlayer = ({ isExpanded }) => {
           {/* Right side: Playlist button + Prev/Next buttons */}
         <div className="flex flex-col items-center gap-1">
           {/* Playlist Toggle Button */}
-          <button 
+          <button
             onClick={(e) => { e.stopPropagation(); setShowPlaylist(!showPlaylist) }}
             className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${showPlaylist ? 'bg-black text-white' : 'text-[var(--endspace-text-muted)] hover:text-black'}`}
             title="Playlist"
           >
             <IconList size={12} stroke={1.5} />
           </button>
-          
+
           {/* Prev/Next Buttons (horizontal) */}
           <div className="flex items-center gap-0.5">
-            <button 
+            <button
               onClick={playPrev}
               className="w-5 h-5 flex items-center justify-center text-[var(--endspace-text-muted)] hover:text-black transition-colors"
               title="Previous"
             >
               <IconPlayerTrackPrev size={11} stroke={1.5} />
             </button>
-            <button 
+            <button
               onClick={playNext}
               className="w-5 h-5 flex items-center justify-center text-[var(--endspace-text-muted)] hover:text-black transition-colors"
               title="Next"
@@ -332,12 +309,12 @@ export const EndspacePlayer = ({ isExpanded }) => {
       {showPlaylist && (
         <div className="mt-2 max-h-36 overflow-y-auto bg-[var(--endspace-bg-secondary)] rounded">
           {audioList.map((audio, index) => (
-            <div 
+            <div
               key={index}
               onClick={() => selectTrack(index)}
               className={`px-3 py-1.5 cursor-pointer transition-colors ${
-                index === currentTrack 
-                  ? 'bg-black text-white' 
+                index === currentTrack
+                  ? 'bg-black text-white'
                   : 'hover:bg-[var(--endspace-bg-tertiary)]'
               }`}
             >
