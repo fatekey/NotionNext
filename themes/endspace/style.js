@@ -486,6 +486,12 @@ export const Style = () => {
         animation: rotate 8s linear infinite;
       }
 
+      /* Endspace uses a custom music UI, so hide default global APlayer widgets. */
+      .aplayer.aplayer-fixed,
+      meting-js[fixed='true'] {
+        display: none !important;
+      }
+
       /* ============================================
          Scan Line & HUD Animations
          ============================================ */
