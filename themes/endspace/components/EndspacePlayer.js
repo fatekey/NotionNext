@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { siteConfig } from '@/lib/config'
 import {
   IconPlayerPlay,
@@ -10,20 +10,6 @@ import {
   IconVolume,
 } from '@tabler/icons-react'
 
-const toBoolean = (value, fallback = false) => {
-  if (typeof value === 'boolean') {
-    return value
-  }
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value)
-    } catch (error) {
-      return value === 'true'
-    }
-  }
-  return fallback
-}
-
 /**
  * EndspacePlayer Component - Compact Sci-Fi Music Player for Endspace Theme
  * Integrates with widget.config.js settings
@@ -34,15 +20,15 @@ export const EndspacePlayer = ({ isExpanded }) => {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTrack, setCurrentTrack] = useState(0)
   const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [showPlaylist, setShowPlaylist] = useState(false)
   const audioRef = useRef(null)
-  const autoPlayTimerRef = useRef(null)
-  const forcePlayOnTrackChangeRef = useRef(false)
+  const progressIntervalRef = useRef(null)
 
   // Get configuration from widget.config.js
   const musicPlayerEnabled = siteConfig('MUSIC_PLAYER')
-  const autoPlay = toBoolean(siteConfig('MUSIC_PLAYER_AUTO_PLAY'), false)
+  const autoPlay = JSON.parse(siteConfig('MUSIC_PLAYER_AUTO_PLAY') || 'false')
   const playOrder = siteConfig('MUSIC_PLAYER_ORDER')
   const audioList = siteConfig('MUSIC_PLAYER_AUDIO_LIST') || []
   const hasInitializedRef = useRef(false)
@@ -54,190 +40,108 @@ export const EndspacePlayer = ({ isExpanded }) => {
 
   const currentAudio = audioList[currentTrack] || {}
 
-  const pauseExternalPlayers = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    if (Array.isArray(window.aplayers)) {
-      window.aplayers.forEach(player => {
-        try {
-          player?.pause?.()
-        } catch (error) {
-          console.warn('Failed to pause external APlayer instance:', error)
-        }
+  // Initialize audio element
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio()
+      audioRef.current.volume = 0.7
+      
+      audioRef.current.addEventListener('ended', handleTrackEnd)
+      audioRef.current.addEventListener('loadedmetadata', () => {
+        setDuration(audioRef.current.duration)
+      })
+      audioRef.current.addEventListener('error', (e) => {
+        console.error('Audio load error:', e)
       })
     }
 
-    if (typeof document === 'undefined') {
-      return
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.removeEventListener('ended', handleTrackEnd)
+      }
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
+      }
     }
-
-    document.querySelectorAll('audio').forEach(audioElement => {
-      if (audioElement === audioRef.current) {
-        return
-      }
-      try {
-        audioElement.autoplay = false
-        audioElement.pause()
-      } catch (error) {
-        console.warn('Failed to pause external audio element:', error)
-      }
-    })
   }, [])
 
-  const playCurrentTrack = useCallback(async () => {
-    const audio = audioRef.current
-    if (!audio) {
-      return false
+  // Load track when currentTrack changes - always auto-play when switching
+  useEffect(() => {
+    if (audioRef.current && currentAudio.url) {
+      audioRef.current.src = currentAudio.url
+      audioRef.current.load()
+      setProgress(0)
+      setCurrentTime(0)
+      
+      // Auto-play when switching tracks (if already initialized)
+      if (hasInitializedRef.current) {
+        audioRef.current.play().catch(e => console.log('Autoplay prevented:', e))
+        setIsPlaying(true)
+      }
     }
+  }, [currentTrack, currentAudio.url])
 
-    pauseExternalPlayers()
+  // Auto-play on initial load based on config
+  useEffect(() => {
+    // Only run this once on mount/init for autoplay
+    if (hasInitializedRef.current) return
 
-    try {
-      await audio.play()
-      return true
-    } catch (error) {
-      console.log('Play prevented by browser:', error)
-      return false
-    }
-  }, [pauseExternalPlayers])
-
-  const handleTrackEnd = useCallback(() => {
-    forcePlayOnTrackChangeRef.current = true
-    if (playOrder === 'random') {
-      const randomIndex = Math.floor(Math.random() * audioList.length)
-      setCurrentTrack(randomIndex)
+    if (autoPlay && audioRef.current && currentAudio.url) {
+      hasInitializedRef.current = true
+      
+      // Simple, direct attempt to play
+      const attemptPlay = async () => {
+        try {
+          await audioRef.current?.play()
+          setIsPlaying(true)
+        } catch (error) {
+          console.log('Autoplay prevented by browser:', error)
+          // We DO NOT attach global listeners here to prevent zombie audio.
+          // If browser blocks, user must manually click play.
+        }
+      }
+      
+      // Small delay to ensure DOM is ready
+      const timer = setTimeout(attemptPlay, 800)
+      return () => clearTimeout(timer)
     } else {
-      setCurrentTrack((prev) => (prev + 1) % audioList.length)
+       hasInitializedRef.current = true
     }
-  }, [audioList.length, playOrder])
+  }, [currentAudio.url, autoPlay])
 
-  // Initialize audio element and bind basic state events
+  // Strict cleanup when track changes
   useEffect(() => {
-    const audio = new Audio()
-    audio.volume = 0.7
-    audio.preload = 'auto'
-    audioRef.current = audio
-
-    const syncProgress = () => {
-      const total = audio.duration || 0
-      const current = audio.currentTime || 0
-      setCurrentTime(current)
-      setProgress(total > 0 ? (current / total) * 100 : 0)
-    }
-
-    const handleAudioPlay = () => setIsPlaying(true)
-    const handleAudioPause = () => setIsPlaying(false)
-    const handleAudioError = (error) => {
-      console.error('Audio load error:', error)
-    }
-
-    audio.addEventListener('loadedmetadata', syncProgress)
-    audio.addEventListener('timeupdate', syncProgress)
-    audio.addEventListener('play', handleAudioPlay)
-    audio.addEventListener('pause', handleAudioPause)
-    audio.addEventListener('error', handleAudioError)
-
     return () => {
-      if (autoPlayTimerRef.current) {
-        clearTimeout(autoPlayTimerRef.current)
-        autoPlayTimerRef.current = null
+       // FORCE PAUSE on unmount/change to kill zombie audio
+       if (audioRef.current) {
+          audioRef.current.pause()
+       }
+    }
+  }, [currentAudio.url])
+
+  // Progress update
+  useEffect(() => {
+    if (isPlaying) {
+      progressIntervalRef.current = setInterval(() => {
+        if (audioRef.current) {
+          const current = audioRef.current.currentTime
+          const total = audioRef.current.duration || 1
+          setCurrentTime(current)
+          setProgress((current / total) * 100)
+        }
+      }, 200)
+    } else {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
       }
-      audio.pause()
-      audio.src = ''
-      audio.removeEventListener('loadedmetadata', syncProgress)
-      audio.removeEventListener('timeupdate', syncProgress)
-      audio.removeEventListener('play', handleAudioPlay)
-      audio.removeEventListener('pause', handleAudioPause)
-      audio.removeEventListener('error', handleAudioError)
-      audioRef.current = null
     }
-  }, [])
-
-  // Track end event is bound separately to keep callback fresh
-  useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) {
-      return
-    }
-    audio.addEventListener('ended', handleTrackEnd)
-    return () => audio.removeEventListener('ended', handleTrackEnd)
-  }, [handleTrackEnd])
-
-  // Keep external APlayer/Meting audio paused to avoid hidden background playback
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return
-    }
-
-    pauseExternalPlayers()
-
-    const stopExternalAudio = (event) => {
-      const target = event.target
-      if (!(target instanceof HTMLAudioElement) || target === audioRef.current) {
-        return
-      }
-
-      const fromKnownPlayer =
-        target.closest('.aplayer') || target.closest('meting-js')
-      if (!fromKnownPlayer) {
-        return
-      }
-
-      target.pause()
-    }
-
-    document.addEventListener('play', stopExternalAudio, true)
-    return () => document.removeEventListener('play', stopExternalAudio, true)
-  }, [pauseExternalPlayers])
-
-  // Load track when currentTrack changes; continue playback only if needed
-  useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || !currentAudio.url) {
-      return
-    }
-
-    const shouldAutoPlay =
-      forcePlayOnTrackChangeRef.current ||
-      (hasInitializedRef.current && !audio.paused)
-
-    forcePlayOnTrackChangeRef.current = false
-    audio.src = currentAudio.url
-    audio.load()
-    setProgress(0)
-    setCurrentTime(0)
-
-    if (shouldAutoPlay) {
-      void playCurrentTrack()
-    }
-  }, [currentTrack, currentAudio.url, playCurrentTrack])
-
-  // Auto-play only once on initial load (if enabled)
-  useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || hasInitializedRef.current) {
-      return
-    }
-
-    hasInitializedRef.current = true
-    if (!autoPlay || !currentAudio.url) {
-      return
-    }
-
-    autoPlayTimerRef.current = setTimeout(() => {
-      forcePlayOnTrackChangeRef.current = true
-      void playCurrentTrack()
-    }, 800)
-
     return () => {
-      if (autoPlayTimerRef.current) {
-        clearTimeout(autoPlayTimerRef.current)
-        autoPlayTimerRef.current = null
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
       }
     }
-  }, [autoPlay, currentAudio.url, playCurrentTrack])
+  }, [isPlaying])
 
   // Close playlist when sidebar collapses
   useEffect(() => {
@@ -246,24 +150,29 @@ export const EndspacePlayer = ({ isExpanded }) => {
     }
   }, [isExpanded])
 
+  const handleTrackEnd = () => {
+    if (playOrder === 'random') {
+      const randomIndex = Math.floor(Math.random() * audioList.length)
+      setCurrentTrack(randomIndex)
+    } else {
+      setCurrentTrack((prev) => (prev + 1) % audioList.length)
+    }
+  }
+
   const togglePlay = (e) => {
     e.stopPropagation()
-    const audio = audioRef.current
-    if (!audio) {
-      return
+    if (!audioRef.current) return
+    
+    if (isPlaying) {
+      audioRef.current.pause()
+    } else {
+      audioRef.current.play().catch(e => console.log('Play prevented:', e))
     }
-
-    if (!audio.paused) {
-      audio.pause()
-      return
-    }
-    void playCurrentTrack()
+    setIsPlaying(!isPlaying)
   }
 
   const playNext = (e) => {
     e?.stopPropagation()
-    const shouldContinuePlaying = audioRef.current ? !audioRef.current.paused : false
-    forcePlayOnTrackChangeRef.current = shouldContinuePlaying
     if (playOrder === 'random') {
       const randomIndex = Math.floor(Math.random() * audioList.length)
       setCurrentTrack(randomIndex)
@@ -274,33 +183,26 @@ export const EndspacePlayer = ({ isExpanded }) => {
 
   const playPrev = (e) => {
     e?.stopPropagation()
-    const shouldContinuePlaying = audioRef.current ? !audioRef.current.paused : false
-    forcePlayOnTrackChangeRef.current = shouldContinuePlaying
     setCurrentTrack((prev) => (prev - 1 + audioList.length) % audioList.length)
   }
 
   const selectTrack = (index) => {
-    if (index === currentTrack) {
-      if (audioRef.current?.paused) {
-        void playCurrentTrack()
-      }
-      setShowPlaylist(false)
-      return
-    }
-
-    forcePlayOnTrackChangeRef.current = true
     setCurrentTrack(index)
     setShowPlaylist(false)
+    if (!isPlaying) {
+      setTimeout(() => {
+        audioRef.current?.play().catch(e => console.log('Play prevented:', e))
+        setIsPlaying(true)
+      }, 100)
+    }
   }
 
   const handleProgressClick = (e) => {
-    const audio = audioRef.current
-    if (!audio || !audio.duration) return
+    if (!audioRef.current || !audioRef.current.duration) return
     const rect = e.currentTarget.getBoundingClientRect()
     const clickX = e.clientX - rect.left
     const percentage = clickX / rect.width
-    audio.currentTime = percentage * audio.duration
-    setCurrentTime(audio.currentTime)
+    audioRef.current.currentTime = percentage * audioRef.current.duration
     setProgress(percentage * 100)
   }
 

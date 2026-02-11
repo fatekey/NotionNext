@@ -5,7 +5,6 @@ import { useGlobal } from '@/lib/global'
 import CONFIG from '../config'
 import SmartLink from '@/components/SmartLink'
 import { EndspacePlayer } from './EndspacePlayer'
-import useIsDesktop from './useIsDesktop'
 import {
   IconMenu2,
   IconX,
@@ -71,7 +70,6 @@ const SocialIconComponents = {
 export const MobileNav = (props) => {
   const router = useRouter()
   const { siteInfo } = useGlobal()
-  const isDesktop = useIsDesktop()
   const [activeTab, setActiveTab] = useState('Home')
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   
@@ -221,7 +219,7 @@ export const MobileNav = (props) => {
 
         {/* Music Player (No Label, No Divider) */}
         <div className="px-6 pb-2">
-          {isDesktop === false && <EndspacePlayer isExpanded={true} />}
+          <EndspacePlayer isExpanded={true} />
         </div>
 
         {/* Social Links (No Label, No Divider) */}

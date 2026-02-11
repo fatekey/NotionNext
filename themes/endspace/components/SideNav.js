@@ -5,7 +5,6 @@ import { useGlobal } from '@/lib/global'
 import CONFIG from '../config'
 import SmartLink from '@/components/SmartLink'
 import { EndspacePlayer } from './EndspacePlayer'
-import useIsDesktop from './useIsDesktop'
 import {
   IconBrandGithub,
   IconBrandTwitter,
@@ -71,7 +70,6 @@ const SocialIconComponents = {
 export const SideNav = (props) => {
   const router = useRouter()
   const { siteInfo } = useGlobal()
-  const isDesktop = useIsDesktop()
   const [isHovered, setIsHovered] = useState(false)
   const [activeTab, setActiveTab] = useState('Home')
   const [indicatorStyle, setIndicatorStyle] = useState({ top: 0, opacity: 0 })
@@ -254,7 +252,7 @@ export const SideNav = (props) => {
       <div className="flex-shrink-0 flex flex-col justify-end h-auto pb-4">
         
         {/* Music Player Section */}
-        {isDesktop && <EndspacePlayer isExpanded={isHovered} />}
+        <EndspacePlayer isExpanded={isHovered} />
 
         {/* Contact Links Section */}
         <div className="py-3 transition-all duration-300">
