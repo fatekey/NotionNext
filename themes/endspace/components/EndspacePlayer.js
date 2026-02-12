@@ -29,19 +29,29 @@ export const EndspacePlayer = ({ isExpanded }) => {
   const musicPlayerEnabled = siteConfig('MUSIC_PLAYER')
   const playOrder = siteConfig('MUSIC_PLAYER_ORDER')
 
+  // Helper: extract audio list from player with fallbacks
+  const getAudioList = useCallback((player) => {
+    if (!player) return []
+    // player.list.audios is the internal array; player.options.audio is the init config
+    const audios = player.list?.audios || player.options?.audio
+    if (!audios) return []
+    return Array.isArray(audios) ? audios : [audios]
+  }, [])
+
   // Sync all UI state from the APlayer instance
   const syncState = useCallback((player) => {
     if (!player?.audio) return
     setIsPlaying(!player.audio.paused)
-    setCurrentTrack(player.list.index)
+    setCurrentTrack(player.list?.index || 0)
     const total = player.audio.duration || 0
     const current = player.audio.currentTime || 0
     setCurrentTime(current)
     setProgress(total > 0 ? (current / total) * 100 : 0)
-    if (player.list.audios?.length > 0) {
-      setAudioList([...player.list.audios])
+    const audioArray = getAudioList(player)
+    if (audioArray.length > 0) {
+      setAudioList([...audioArray])
     }
-  }, [])
+  }, [getAudioList])
 
   // Poll for the global APlayer instance and bind events once available
   useEffect(() => {
@@ -61,24 +71,37 @@ export const EndspacePlayer = ({ isExpanded }) => {
         setProgress(total > 0 ? (current / total) * 100 : 0)
       })
       player.on('listswitch', () => {
-        setCurrentTrack(player.list.index)
+        setCurrentTrack(player.list?.index || 0)
         setProgress(0)
         setCurrentTime(0)
-        if (player.list.audios?.length > 0) {
-          setAudioList([...player.list.audios])
+        const audioArray = getAudioList(player)
+        if (audioArray.length > 0) {
+          setAudioList([...audioArray])
         }
       })
-
-      setIsReady(true)
     }
 
+    let resolved = false
+
     const checkAPlayer = () => {
-      if (
-        typeof window !== 'undefined' &&
-        window.aplayers?.length > 0 &&
-        window.aplayers[0]?.audio
-      ) {
-        bindPlayer(window.aplayers[0])
+      if (typeof window === 'undefined') return
+      // Try both window.aplayers (set by APlayer/Meting) and APlayer.instances
+      const player =
+        (window.aplayers?.length > 0 && window.aplayers[0]) ||
+        (window.APlayer?.instances?.length > 0 && window.APlayer.instances[0])
+      if (!player?.audio) return
+
+      // Bind events once
+      if (!playerRef.current) {
+        bindPlayer(player)
+      }
+
+      // Keep polling until audio list is available
+      const audioArray = getAudioList(player)
+      if (audioArray.length > 0) {
+        setAudioList(prev => prev.length === 0 ? [...audioArray] : prev)
+        setIsReady(true)
+        resolved = true
         if (pollTimerRef.current) {
           clearInterval(pollTimerRef.current)
           pollTimerRef.current = null
@@ -87,7 +110,7 @@ export const EndspacePlayer = ({ isExpanded }) => {
     }
 
     checkAPlayer()
-    if (!playerRef.current) {
+    if (!resolved) {
       pollTimerRef.current = setInterval(checkAPlayer, 500)
     }
 
@@ -97,7 +120,7 @@ export const EndspacePlayer = ({ isExpanded }) => {
         pollTimerRef.current = null
       }
     }
-  }, [musicPlayerEnabled, syncState])
+  }, [musicPlayerEnabled, syncState, getAudioList])
 
   // Close playlist when sidebar collapses
   useEffect(() => {
