@@ -70,8 +70,8 @@ export const EndspacePlayer = ({ isExpanded }) => {
         setCurrentTime(current)
         setProgress(total > 0 ? (current / total) * 100 : 0)
       })
-      player.on('listswitch', () => {
-        setCurrentTrack(player.list?.index || 0)
+      player.on('listswitch', (data) => {
+        setCurrentTrack(data?.index ?? player.list?.index ?? 0)
         setProgress(0)
         setCurrentTime(0)
         const audioArray = getAudioList(player)
