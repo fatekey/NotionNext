@@ -39,16 +39,18 @@ const Player = () => {
     }
 
     if (!meting && window.APlayer) {
-      setPlayer(
-        new window.APlayer({
-          container: ref.current,
-          fixed: true,
-          lrcType: lrcType,
-          autoplay: autoPlay,
-          order: order,
-          audio: audio
-        })
-      )
+      const ap = new window.APlayer({
+        container: ref.current,
+        fixed: true,
+        lrcType: lrcType,
+        autoplay: autoPlay,
+        order: order,
+        audio: audio
+      })
+      // Expose instance globally for theme player components to discover
+      if (!window.aplayers) window.aplayers = []
+      window.aplayers.push(ap)
+      setPlayer(ap)
     }
   }
 
