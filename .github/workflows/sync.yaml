@@ -13,9 +13,26 @@ jobs:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
     steps:
-      # Step 1: run a standard checkout action
+      # Step 0: 确认 PAT secret 已配置，否则快速失败并给出明确提示
+      - name: Verify sync token
+        env:
+          TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::未检测到 secret UPSTREAM_SYNC_TOKEN。请在 Settings → Secrets and variables → Actions 添加（PAT 需带 repo + workflow 权限）。"
+            exit 1
+          fi
+          echo "UPSTREAM_SYNC_TOKEN 已配置（长度 ${#TOKEN}）。"
+
+      # Step 1: 检出目标仓库
+      # 必须用 PAT 检出：checkout 默认会把所用 token 持久化为 http.extraheader，
+      # 该 header 会按域名强制覆盖后续所有对 github.com 的认证。若此处用默认的
+      # GITHUB_TOKEN，则后面同步动作即便拿到 PAT 也会被 extraheader 覆盖，
+      # 导致 push .github/workflows/ 下的文件被拒绝。
       - name: Checkout target repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
       # Step 2: run the sync action
       - name: Sync upstream changes
@@ -25,11 +42,8 @@ jobs:
           upstream_sync_repo: tangly1024/NotionNext
           upstream_sync_branch: main
           target_sync_branch: main
-          # GITHUB_TOKEN 无法推送 .github/workflows/ 下的文件（GitHub 安全限制），
-          # 上游一旦改动 workflow 文件，同步就会被拒绝。需改用带 workflow 权限的 PAT：
-          # 在仓库 Settings → Secrets and variables → Actions 新增名为
-          # UPSTREAM_SYNC_TOKEN 的 secret（PAT 需勾选 repo + workflow 权限）。
-          # 未配置时自动回退到 GITHUB_TOKEN（仅能同步非 workflow 文件）。
+          # 使用带 workflow 权限的 PAT（secret: UPSTREAM_SYNC_TOKEN），
+          # 否则上游改动 .github/workflows/ 下的文件时同步会被 GitHub 拒绝。
           target_repo_token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
           # Set test_mode true to run tests instead of the true action!!
@@ -38,6 +52,6 @@ jobs:
       - name: Sync check
         if: failure()
         run: |
-          echo "[Error] 同步失败。常见原因：上游改动了 .github/workflows/ 下的文件，而 GITHUB_TOKEN 无权推送 workflow 变更。"
-          echo "解决办法：配置带 workflow 权限的 PAT 到仓库 secret 'UPSTREAM_SYNC_TOKEN'，并先手动 Sync Fork 一次。"
+          echo "[Error] 同步失败。常见原因：上游改动了 .github/workflows/ 下的文件，而推送所用令牌无 workflow 权限。"
+          echo "解决办法：确认 secret 'UPSTREAM_SYNC_TOKEN' 是带 workflow 权限的 PAT（classic 勾 repo+workflow；fine-grained 给 Contents 和 Workflows 读写）。"
           exit 1
